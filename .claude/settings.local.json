@@ -8,7 +8,8 @@
       "Bash(python -c \"from api.turtle_soup import router; print\\('turtle_soup import OK, routes:', [r.path for r in router.routes]\\)\")",
       "Bash(git ls-files *)",
       "Bash(git log *)",
-      "Bash(xargs wc -l)"
+      "Bash(xargs wc -l)",
+      "Bash(python *)"
     ]
   }
 }
