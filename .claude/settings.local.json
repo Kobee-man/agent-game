@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\('core/turtle_soup_judge.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('api/turtle_soup.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"from core.turtle_soup_judge import judge_answer, build_prompt, contains_negation, detect_opposite_keywords, preprocess_question; print\\('Import OK'\\); p, s = build_prompt\\('一个人得了绝症看到半杯水哭了', '他是生病了吗？'\\); print\\('Prompt:', repr\\(p\\)\\); print\\('System:', repr\\(s\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from api.turtle_soup import router; print\\('turtle_soup import OK, routes:', [r.path for r in router.routes]\\)\")",
+      "Bash(git ls-files *)",
+      "Bash(git log *)",
+      "Bash(xargs wc -l)"
+    ]
+  }
+}

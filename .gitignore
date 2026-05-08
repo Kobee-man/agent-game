@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.pyc
+*.pyn
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 数据库
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Node.js (前端)
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 日志
+*.log
+logs/
+
+# 测试覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*~
+
+# 上传的文件（保留目录结构，忽略内容）
+static/avatars/*.jpg
+static/avatars/*.jpeg
+static/avatars/*.png
+static/avatars/*.gif
+
+# AI模型缓存（大文件）
+ollama_models/
+
+# Trae IDE
+.trae/skills/
