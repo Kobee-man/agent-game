@@ -4,7 +4,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from core.db import get_db
-from core.security import get_password_hash, verify_password, create_access_token
+from core.security import get_password_hash, verify_password, create_access_token, register_session
 from models.db_models import User
 
 router = APIRouter()
@@ -71,7 +71,9 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
     if not user or not verify_password(data.password, user.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    return {"access_token": create_access_token({"sub": data.username}), "token_type": "bearer"}
+    token = create_access_token({"sub": data.username})
+    register_session(data.username, token)
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @router.post("/forgot-password", summary="重置密码")

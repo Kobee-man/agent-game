@@ -19,13 +19,13 @@ from core.db import get_db, SessionLocal
 from core.security import get_current_user
 from core.state_machine import State
 from core.task_queue import TaskType
-from core.runtime import runtime, Room
+from core.runtime import runtime, Room, GAME_TYPES
 from core.agent import agent
 from core.llm_service import llm_service
 from core.json_parser import parse_llm_json
 from core.redis_service import redis_service
 from core.prompts import build_puzzle_prompt
-from models.db_models import User, PublicChatMessage
+from models.db_models import User, Message
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/room", tags=["房间"])
@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 
 
 class CreateRoomReq(BaseModel):
+    game_type: str = Field(default="turtle_soup")
     difficulty: str = Field(default="medium")
     max_questions: int = Field(default=20, ge=5, le=50)
     max_players: int = Field(default=4, ge=1, le=10)
@@ -48,6 +49,11 @@ class JoinRoomReq(BaseModel):
 
 class StartRoomReq(BaseModel):
     room_id: str
+
+
+class SwitchGameReq(BaseModel):
+    room_id: str
+    game_type: str
 
 
 # ==================== 辅助 ====================
@@ -67,10 +73,10 @@ def _decode_ws_token(token: str, db: Session) -> User:
     return user
 
 
-def _save_message(uid: str, content: str, is_system: bool):
+def _save_message(uid: str, content: str, is_system: bool, room_id: str = None):
     db = SessionLocal()
     try:
-        db.add(PublicChatMessage(sender_uid=uid, content=content, is_system=is_system))
+        db.add(Message(user_uid=uid, content=content, is_system=is_system, room_id=room_id))
         db.commit()
     except Exception:
         db.rollback()
@@ -86,12 +92,16 @@ async def create_room(
     current_user: User = Depends(get_current_user),
 ):
     """创建房间（需要登录）。"""
+    if data.game_type not in GAME_TYPES:
+        raise HTTPException(status_code=400, detail=f"未知游戏类型: {data.game_type}")
+
     # 检查用户是否已在其他房间
     existing = runtime.get_player_room(current_user.uid)
     if existing:
         raise HTTPException(status_code=400, detail=f"已在房间 {existing} 中, 请先离开")
 
     settings = {
+        "game_type": data.game_type,
         "difficulty": data.difficulty,
         "max_questions": data.max_questions,
         "max_players": data.max_players,
@@ -160,6 +170,18 @@ async def start_room(
         raise HTTPException(status_code=403, detail="仅房主可开始")
     if room.sm.state != State.WAITING:
         raise HTTPException(status_code=400, detail=f"当前状态 ({room.sm.value}) 无法开始")
+
+    # 校验人数
+    game_cfg = GAME_TYPES.get(room.game_type, {})
+    min_p = game_cfg.get("min_players", 1)
+    max_p = game_cfg.get("max_players", 4)
+    count = len(room.players)
+    if count < min_p or count > max_p:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{game_cfg.get('name', room.game_type)} 需要 {min_p}-{max_p} 人, 当前 {count} 人",
+        )
+
     if not llm_service.is_available():
         raise HTTPException(status_code=503, detail="LLM服务不可用")
 
@@ -192,7 +214,7 @@ async def start_room(
 
     # Redis备份
     try:
-        redis_service.set_puzzle(room.room_id, puzzle)
+        redis_service.set_puzzle(room.room_id, puzzle, prefix="room:")
     except Exception:
         pass
 
@@ -220,6 +242,40 @@ async def start_room(
     }
 
 
+@router.post("/switch-game")
+async def switch_game(
+    data: SwitchGameReq,
+    current_user: User = Depends(get_current_user),
+):
+    """切换房间游戏类型（仅房主, WAITING状态下）。"""
+    if data.game_type not in GAME_TYPES:
+        raise HTTPException(status_code=400, detail=f"未知游戏类型: {data.game_type}")
+
+    room = runtime.get_room(data.room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="房间不存在")
+    if room.host_uid != current_user.uid:
+        raise HTTPException(status_code=403, detail="仅房主可切换")
+    if room.sm.state != State.WAITING:
+        raise HTTPException(status_code=400, detail=f"当前状态 ({room.sm.value}) 无法切换")
+
+    game_cfg = GAME_TYPES[data.game_type]
+    count = len(room.players)
+    if count < game_cfg["min_players"] or count > game_cfg["max_players"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{game_cfg['name']} 需要 {game_cfg['min_players']}-{game_cfg['max_players']} 人, 当前 {count} 人",
+        )
+
+    room.game_type = data.game_type
+    return {
+        "success": True,
+        "room_id": room.room_id,
+        "game_type": room.game_type,
+        "game_name": game_cfg["name"],
+    }
+
+
 @router.get("/status/{room_id}")
 async def room_status(room_id: str):
     """查看房间状态。"""
@@ -227,6 +283,12 @@ async def room_status(room_id: str):
     if not room:
         raise HTTPException(status_code=404, detail="房间不存在")
     return room.to_status_dict()
+
+
+@router.get("/games")
+async def list_games():
+    """列出可用游戏类型。"""
+    return {"games": GAME_TYPES}
 
 
 @router.get("/list")
@@ -307,7 +369,7 @@ async def websocket_room(ws: WebSocket, room_id: str, token: str):
         "timestamp": datetime.now().isoformat(),
     }
     await room.broadcast(join_msg)
-    asyncio.get_event_loop().run_in_executor(None, _save_message, uid, join_msg["content"], True)
+    asyncio.get_event_loop().run_in_executor(None, _save_message, uid, join_msg["content"], True, room_id)
 
     try:
         while True:
@@ -329,7 +391,7 @@ async def websocket_room(ws: WebSocket, room_id: str, token: str):
                     "timestamp": datetime.now().isoformat(),
                 }
                 await room.broadcast(msg)
-                asyncio.get_event_loop().run_in_executor(None, _save_message, uid, content, False)
+                asyncio.get_event_loop().run_in_executor(None, _save_message, uid, content, False, room_id)
 
                 # 提交AI回复任务到队列
                 task_id = await runtime.submit_task(
@@ -411,7 +473,7 @@ async def websocket_room(ws: WebSocket, room_id: str, token: str):
             "timestamp": datetime.now().isoformat(),
         }
         await room.broadcast(leave_msg)
-        asyncio.get_event_loop().run_in_executor(None, _save_message, uid, leave_msg["content"], True)
+        asyncio.get_event_loop().run_in_executor(None, _save_message, uid, leave_msg["content"], True, room_id)
 
 
 # ==================== 后台任务回调 ====================

@@ -1,3 +1,3 @@
-from models.db_models import User, PublicChatMessage
+from models.db_models import User, Message
 
-__all__ = ["User", "PublicChatMessage"]
+__all__ = ["User", "Message"]

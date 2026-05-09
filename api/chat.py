@@ -12,7 +12,7 @@ from sqlalchemy import select
 from core.config import SECRET_KEY, ALGORITHM
 from core.db import get_db, SessionLocal
 from core.security import get_current_user
-from models.db_models import User, PublicChatMessage
+from models.db_models import User, Message
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,9 +35,9 @@ class ConnectionManager:
 
         # 发送历史消息
         messages = (
-            db.query(PublicChatMessage, User)
-            .join(User, PublicChatMessage.sender_uid == User.uid)
-            .order_by(PublicChatMessage.send_time.desc())
+            db.query(Message, User)
+            .join(User, Message.user_uid == User.uid)
+            .order_by(Message.created_at.desc())
             .limit(50)
             .all()
         )
@@ -50,7 +50,7 @@ class ConnectionManager:
                 "username": user_row.username,
                 "nickname": user_row.nickname or user_row.username,
                 "avatar_url": user_row.avatar_url,
-                "timestamp": msg.send_time.isoformat(),
+                "timestamp": msg.created_at.isoformat(),
             }
             for msg, user_row in messages
         ]
@@ -80,7 +80,7 @@ class ConnectionManager:
     def save_message(self, uid: str, content: str, is_system: bool):
         db = SessionLocal()
         try:
-            db.add(PublicChatMessage(sender_uid=uid, content=content, is_system=is_system))
+            db.add(Message(user_uid=uid, content=content, is_system=is_system))
             db.commit()
         except Exception:
             db.rollback()
@@ -181,9 +181,9 @@ def get_chat_history(
     db: Session = Depends(get_db),
 ):
     rows = (
-        db.query(PublicChatMessage, User)
-        .join(User, PublicChatMessage.sender_uid == User.uid)
-        .order_by(PublicChatMessage.send_time.desc())
+        db.query(Message, User)
+        .join(User, Message.user_uid == User.uid)
+        .order_by(Message.created_at.desc())
         .limit(limit)
         .all()
     )
@@ -198,7 +198,7 @@ def get_chat_history(
                 "username": user.username,
                 "nickname": user.nickname or user.username,
                 "avatar_url": user.avatar_url,
-                "timestamp": msg.send_time.isoformat(),
+                "timestamp": msg.created_at.isoformat(),
             }
             for msg, user in rows
         ],

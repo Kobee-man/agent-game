@@ -2,10 +2,21 @@ from datetime import datetime
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
-from core.db import init_db
+from core.db import engine, init_db
 from core.llm_service import llm_service
 from api import auth, user, chat, turtle_soup, room
+
+# 检查 MySQL 连接
+try:
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    print("[OK] 数据库连接成功")
+except Exception as e:
+    print(f"[ERROR] 数据库连接失败: {e}")
+    print("请先启动 MySQL 服务，再运行本项目")
+    exit(1)
 
 init_db()
 

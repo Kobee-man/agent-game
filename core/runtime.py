@@ -25,6 +25,11 @@ from core.prompts import build_question_judge_prompt, build_answer_check_prompt
 
 logger = logging.getLogger(__name__)
 
+# ---- 游戏类型注册表（预留扩展） ----
+GAME_TYPES: dict[str, dict] = {
+    "turtle_soup": {"name": "海龟汤", "min_players": 1, "max_players": 4},
+}
+
 
 class Room:
     """一个房间 = 状态机 + 任务队列 + WebSocket连接 + 游戏数据。"""
@@ -40,7 +45,8 @@ class Room:
         self.ws_connections: dict[str, dict[str, WebSocket]] = {}  # uid → {conn_id: ws}
 
         # 游戏数据
-        self.settings = settings
+        self.game_type: str = settings.get("game_type", "turtle_soup")
+        self.settings = {k: v for k, v in settings.items() if k != "game_type"}
         self.puzzle: Optional[dict] = None
         self.question_history: list[dict] = []
         self.question_count = 0
@@ -164,7 +170,8 @@ class Room:
                     # 写Redis
                     try:
                         redis_service.append_history(
-                            self.room_id, question, parsed["answer"], parsed.get("reason", "")
+                            self.room_id, question, parsed["answer"], parsed.get("reason", ""),
+                            prefix="room:",
                         )
                     except Exception:
                         pass
@@ -202,8 +209,8 @@ class Room:
                         self.finish_game()
                         # 清理Redis
                         try:
-                            redis_service.delete_puzzle(self.room_id)
-                            redis_service.delete_history(self.room_id)
+                            redis_service.delete_puzzle(self.room_id, prefix="room:")
+                            redis_service.delete_history(self.room_id, prefix="room:")
                         except Exception:
                             pass
                         return {"is_correct": True, "result": parsed, "truth": self.puzzle["truth"]}
@@ -229,10 +236,13 @@ class Room:
         return None
 
     def to_status_dict(self) -> dict:
+        game_info = GAME_TYPES.get(self.game_type, {})
         return {
             "room_id": self.room_id,
             "state": self.sm.value,
             "host_uid": self.host_uid,
+            "game_type": self.game_type,
+            "game_name": game_info.get("name", self.game_type),
             "players": list(self.players.values()),
             "online": self.online_users,
             "question_count": self.question_count,
@@ -244,6 +254,18 @@ class Room:
             "puzzle_title": self.puzzle.get("title", "") if self.puzzle else "",
         }
 
+    @property
+    def is_stale(self) -> bool:
+        """FINISHED 状态超过 5 分钟视为过期。"""
+        if self.sm.state != State.FINISHED or not self.finished_at:
+            return False
+        from datetime import datetime as dt
+        try:
+            finished = dt.fromisoformat(self.finished_at)
+            return (dt.now() - finished).total_seconds() > 300
+        except (ValueError, TypeError):
+            return False
+
 
 class Runtime:
     """全局运行时 — 管理所有房间的生命周期。"""
@@ -252,6 +274,7 @@ class Runtime:
         self._rooms: dict[str, Room] = {}
         self._max_rooms = max_rooms
         self._max_llm_per_room = max_llm_per_room
+        self._cleanup_task: Optional[asyncio.Task] = None
 
     def create_room(self, host_uid: str, settings: Optional[dict] = None) -> Room:
         """创建新房间, 启动其任务队列。"""
@@ -262,6 +285,7 @@ class Runtime:
         settings = settings or {"max_questions": 20, "max_players": 4, "difficulty": "medium"}
         room = Room(room_id, host_uid, settings)
         self._rooms[room_id] = room
+        self._ensure_cleanup_task()
         logger.info(f"房间创建: {room_id} host={host_uid}")
         return room
 
@@ -312,7 +336,10 @@ class Runtime:
 
         # 状态转换: RUNNING → PROCESSING
         if room.sm.can("task_submit"):
-            room.sm.transition("task_submit")
+            try:
+                room.sm.transition("task_submit")
+            except ValueError:
+                pass
 
         task_id = await room.queue.submit(task)
         return task_id
@@ -330,13 +357,18 @@ class Runtime:
             if not task:
                 return None
             if task.status == TaskStatus.DONE:
-                # PROCESSING → RUNNING
                 if room.sm.can("task_done"):
-                    room.sm.transition("task_done")
+                    try:
+                        room.sm.transition("task_done")
+                    except ValueError:
+                        pass
                 return {"status": "done", "result": task.result}
             if task.status == TaskStatus.FAILED:
                 if room.sm.can("task_done"):
-                    room.sm.transition("task_done")
+                    try:
+                        room.sm.transition("task_done")
+                    except ValueError:
+                        pass
                 return {"status": "failed", "error": task.error}
             await asyncio.sleep(interval)
             elapsed += interval
@@ -356,6 +388,23 @@ class Runtime:
             if uid in room.players:
                 return rid
         return None
+
+    async def _cleanup_loop(self):
+        """定时清理过期的已结束房间。"""
+        while True:
+            await asyncio.sleep(60)
+            stale_ids = [rid for rid, room in self._rooms.items() if room.is_stale]
+            for rid in stale_ids:
+                await self.close_room(rid)
+                logger.info(f"自动清理过期房间: {rid}")
+
+    def _ensure_cleanup_task(self):
+        if self._cleanup_task is None or self._cleanup_task.done():
+            try:
+                loop = asyncio.get_running_loop()
+                self._cleanup_task = loop.create_task(self._cleanup_loop())
+            except RuntimeError:
+                pass
 
 
 # 全局单例
