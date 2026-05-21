@@ -10,7 +10,8 @@
       "Bash(git log *)",
       "Bash(xargs wc -l)",
       "Bash(python *)",
-      "Bash(pip list *)"
+      "Bash(pip list *)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

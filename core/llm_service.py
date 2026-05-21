@@ -1,7 +1,10 @@
 import os
+import logging
 import httpx
 from typing import Optional
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -15,6 +18,11 @@ class LLMConfig:
     temperature: float = 0.5
     max_tokens: int = 1000
     timeout: float = 30.0
+    # 连接池
+    external_max_connections: int = 10
+    external_max_keepalive: int = 5
+    ollama_max_connections: int = 5
+    ollama_max_keepalive: int = 2
 
 
 class LLMError(Exception):
@@ -24,6 +32,22 @@ class LLMError(Exception):
 class LLMService:
     def __init__(self, config: Optional[LLMConfig] = None):
         self.config = config or LLMConfig()
+        # 外部API连接池
+        self._external_client = httpx.AsyncClient(
+            timeout=self.config.timeout,
+            limits=httpx.Limits(
+                max_connections=self.config.external_max_connections,
+                max_keepalive_connections=self.config.external_max_keepalive,
+            ),
+        )
+        # 本地Ollama连接池
+        self._ollama_client = httpx.AsyncClient(
+            timeout=self.config.timeout,
+            limits=httpx.Limits(
+                max_connections=self.config.ollama_max_connections,
+                max_keepalive_connections=self.config.ollama_max_keepalive,
+            ),
+        )
 
     @property
     def mode(self) -> str:
@@ -47,7 +71,24 @@ class LLMService:
         if self.config.mode == "local":
             return await self._call_ollama(prompt, system_prompt, t, m)
         elif self.config.mode == "external":
-            return await self._call_external(prompt, system_prompt, t, m)
+            # 一级: 外部API
+            try:
+                return await self._call_external(prompt, system_prompt, t, m)
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                logger.warning(f"外部API失败({type(e).__name__})，降级到本地Ollama")
+            # 二级: 本地Ollama
+            try:
+                return await self._call_ollama(prompt, system_prompt, t, m)
+            except LLMError as e:
+                logger.warning(f"本地Ollama也失败: {e}，降级到题库")
+            # 三级: 题库
+            from core.puzzle_bank import puzzle_bank
+            puzzle = puzzle_bank.get_random()
+            if puzzle:
+                logger.info("从题库返回随机题目")
+                import json
+                return json.dumps(puzzle, ensure_ascii=False)
+            raise LLMError("所有LLM通道不可用且题库为空")
         raise LLMError(f"不支持的模式: {self.config.mode}")
 
     async def _call_ollama(self, prompt: str, system: str, temp: float, max_tok: int) -> str:
@@ -61,14 +102,13 @@ class LLMService:
             payload["system"] = system
 
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                resp = await client.post(f"{self.config.ollama_host}/api/generate", json=payload)
-                if resp.status_code != 200:
-                    raise LLMError(f"Ollama错误 (HTTP {resp.status_code})")
-                text = resp.json().get("response", "").strip()
-                if not text:
-                    raise LLMError("Ollama返回空内容")
-                return text
+            resp = await self._ollama_client.post(f"{self.config.ollama_host}/api/generate", json=payload)
+            if resp.status_code != 200:
+                raise LLMError(f"Ollama错误 (HTTP {resp.status_code})")
+            text = resp.json().get("response", "").strip()
+            if not text:
+                raise LLMError("Ollama返回空内容")
+            return text
         except httpx.ConnectError:
             raise LLMError("无法连接Ollama，请确认 ollama serve 已启动")
         except httpx.TimeoutException:
@@ -96,22 +136,19 @@ class LLMService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                resp = await client.post(self.config.api_url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"]
-                elif resp.status_code == 401:
-                    raise LLMError("API密钥无效")
-                elif resp.status_code == 429:
-                    raise LLMError("请求频率超限")
-                else:
-                    raise LLMError(f"API错误 (HTTP {resp.status_code})")
+            resp = await self._external_client.post(self.config.api_url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"]
+            elif resp.status_code == 401:
+                raise LLMError("API密钥无效")
+            elif resp.status_code == 429:
+                raise LLMError("请求频率超限")
+            else:
+                raise LLMError(f"API错误 (HTTP {resp.status_code})")
         except LLMError:
             raise
-        except httpx.ConnectError:
-            raise LLMError(f"无法连接: {self.config.api_url}")
-        except httpx.TimeoutException:
-            raise LLMError(f"请求超时 ({self.config.timeout}s)")
+        except (httpx.TimeoutException, httpx.ConnectError):
+            raise
         except Exception as e:
             raise LLMError(f"调用失败: {e}")
 

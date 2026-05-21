@@ -25,6 +25,8 @@ from core.llm_service import llm_service
 from core.json_parser import parse_llm_json
 from core.redis_service import redis_service
 from core.prompts import build_puzzle_prompt
+from core.undercover import UndercoverGame
+from core.ai_player import AIThinker
 from models.db_models import User, Message
 
 logger = logging.getLogger(__name__)
@@ -171,19 +173,19 @@ async def start_room(
     if room.sm.state != State.WAITING:
         raise HTTPException(status_code=400, detail=f"当前状态 ({room.sm.value}) 无法开始")
 
-    # 校验人数
-    game_cfg = GAME_TYPES.get(room.game_type, {})
-    min_p = game_cfg.get("min_players", 1)
-    max_p = game_cfg.get("max_players", 4)
-    count = len(room.players)
-    if count < min_p or count > max_p:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{game_cfg.get('name', room.game_type)} 需要 {min_p}-{max_p} 人, 当前 {count} 人",
-        )
-
-    if not llm_service.is_available():
+    if not llm_service.is_available() and room.game_type == "turtle_soup":
         raise HTTPException(status_code=503, detail="LLM服务不可用")
+
+    if room.game_type == "undercover":
+        # 谁是卧底：不需LLM，等待WS中分配词语
+        room.start_game()
+        return {
+            "success": True,
+            "room_id": room.room_id,
+            "state": room.sm.value,
+            "game_type": "undercover",
+            "players": [p["username"] for p in room.players.values()],
+        }
 
     # LLM生成谜题
     difficulty = room.settings.get("difficulty", "medium")
@@ -260,13 +262,6 @@ async def switch_game(
         raise HTTPException(status_code=400, detail=f"当前状态 ({room.sm.value}) 无法切换")
 
     game_cfg = GAME_TYPES[data.game_type]
-    count = len(room.players)
-    if count < game_cfg["min_players"] or count > game_cfg["max_players"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{game_cfg['name']} 需要 {game_cfg['min_players']}-{game_cfg['max_players']} 人, 当前 {count} 人",
-        )
-
     room.game_type = data.game_type
     return {
         "success": True,
@@ -376,27 +371,143 @@ async def websocket_room(ws: WebSocket, room_id: str, token: str):
             data = await ws.receive_json()
             action = data.get("action", "chat")
             content = data.get("content", "").strip()
-            if not content:
+            if not content and action not in ("assign-words",):
                 continue
 
-            if action == "chat":
+            # ========== 谁是卧底 专属 action ==========
+            if action == "assign-words" and room.game_type == "undercover":
+                if uid != room.host_uid:
+                    await ws.send_json({"type": "error", "content": "仅房主可分配词语"})
+                    continue
+                uids = list(room.players.keys())
+                if len(uids) < 3:
+                    await ws.send_json({"type": "error", "content": "至少需要3名玩家"})
+                    continue
+                game = UndercoverGame(uids, ai_players=getattr(room, 'ai_player_uids', set()))
+                room.undercover_game = game
+                game.start_describing()
+                # 逐个私发词语和角色
+                for p_uid in uids:
+                    await room.send_to(p_uid, {
+                        "type": "word_assigned",
+                        "word": game.get_word(p_uid),
+                        "role": game.get_role(p_uid),
+                        "round": game.round_num,
+                        "phase": game.phase,
+                    })
+                # 广播游戏开始
+                await room.broadcast({
+                    "type": "undercover_state",
+                    "phase": "describing",
+                    "round": game.round_num,
+                    "turn_order": game.turn_order,
+                    "current_turn": game.get_next_describer(),
+                    "alive_count": len(game.alive_players),
+                })
+
+            elif action == "describe" and room.game_type == "undercover":
+                game: UndercoverGame | None = getattr(room, "undercover_game", None)
+                if not game or game.phase != "describing":
+                    await ws.send_json({"type": "error", "content": "当前不在描述阶段"})
+                    continue
+                next_uid = game.get_next_describer()
+                if next_uid != uid:
+                    await ws.send_json({"type": "error", "content": "还没轮到你描述"})
+                    continue
+                # 敏感词检测
+                filtered, is_violation = game.check_sensitive(uid, content)
+                if is_violation:
+                    await room.send_to(uid, {
+                        "type": "sensitive_warning",
+                        "content": "你的描述包含敏感词，已自动过滤",
+                        "original": content,
+                        "filtered": filtered,
+                    })
+                game.describe(uid, filtered)
+                # 更新AI记忆
+                for ai_uid in game.ai_players:
+                    if ai_uid in game.alive_players:
+                        AIThinker.record_heard(
+                            game_id=room_id, role_id=ai_uid,
+                            round_num=game.round_num, speaker=display_name, description=filtered,
+                        )
+                # 广播描述
+                await room.broadcast({
+                    "type": "player_described",
+                    "uid": uid,
+                    "username": user.username,
+                    "nickname": display_name,
+                    "description": filtered,
+                    "has_violation": is_violation,
+                    "round": game.round_num,
+                })
+                asyncio.get_event_loop().run_in_executor(
+                    None, _save_message, uid, f"[描述] {filtered}", False, room_id
+                )
+                # 自动触发AI描述
+                from api.undercover import auto_play_ai_descriptions, auto_play_ai_votes
+                await auto_play_ai_descriptions(room, game, room_id)
+
+            elif action == "vote" and room.game_type == "undercover":
+                game: UndercoverGame | None = getattr(room, "undercover_game", None)
+                if not game or game.phase != "voting":
+                    await ws.send_json({"type": "error", "content": "当前不在投票阶段"})
+                    continue
+                target = data.get("target", "").strip()
+                if not target or target not in game.alive_players:
+                    await ws.send_json({"type": "error", "content": "投票目标无效"})
+                    continue
+                if not game.vote(uid, target):
+                    await ws.send_json({"type": "error", "content": "投票失败（可能已投票）"})
+                    continue
+                # 广播投票
+                await room.broadcast({
+                    "type": "player_voted",
+                    "voter_uid": uid,
+                    "voter_name": display_name,
+                    "target_uid": target,
+                    "target_name": room.players.get(target, {}).get("username", target),
+                    "round": game.round_num,
+                })
+                # 自动触发AI投票（内部处理结算和广播）
+                from api.undercover import auto_play_ai_votes
+                await auto_play_ai_votes(room, game, room_id)
+
+            # ========== 聊天 + 海龟汤 action ==========
+            elif action == "chat":
+                # ---- 谁是卧底: 敏感词过滤 ----
+                broadcast_content = content
+                if room.game_type == "undercover":
+                    game: UndercoverGame | None = getattr(room, "undercover_game", None)
+                    if game and not game.is_finished:
+                        filtered, is_violation = game.check_sensitive(uid, content)
+                        if is_violation:
+                            await room.send_to(uid, {
+                                "type": "sensitive_warning",
+                                "content": "你的消息包含敏感词，已自动过滤",
+                                "original": content,
+                                "filtered": filtered,
+                            })
+                        broadcast_content = filtered
                 # ---- 普通聊天 ----
                 # 广播用户消息
                 msg = {
                     "type": "message",
-                    "content": content,
+                    "content": broadcast_content,
                     "username": user.username,
                     "nickname": display_name,
                     "avatar_url": user.avatar_url,
                     "timestamp": datetime.now().isoformat(),
                 }
                 await room.broadcast(msg)
-                asyncio.get_event_loop().run_in_executor(None, _save_message, uid, content, False, room_id)
+                asyncio.get_event_loop().run_in_executor(None, _save_message, uid, broadcast_content, False, room_id)
 
-                # 提交AI回复任务到队列
+                # 提交AI回复任务到队列（谁是卧底不需要AI回复）
+                if room.game_type == "undercover":
+                    continue
                 task_id = await runtime.submit_task(
                     room_id, TaskType.CHAT,
-                    {"message": content},
+                    {"message": broadcast_content},
                     requester_id=uid,
                 )
                 if task_id:

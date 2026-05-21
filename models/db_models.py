@@ -25,3 +25,16 @@ class Message(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     is_system = Column(Boolean, default=False, nullable=False)
+
+
+class PuzzleBank(Base):
+    """题库表 — LLM降级时使用，上限50道，FIFO淘汰。"""
+    __tablename__ = "puzzle_bank"
+
+    idx = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=False, default="未命名谜题")
+    situation = Column(Text, nullable=False)
+    truth = Column(Text, nullable=False)
+    category = Column(String(50), default="未分类")
+    hints = Column(Text, default="[]")
+    created_at = Column(DateTime, default=datetime.now, nullable=False, index=True)

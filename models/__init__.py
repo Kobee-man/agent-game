@@ -1,3 +1,3 @@
-from models.db_models import User, Message
+from models.db_models import User, Message, PuzzleBank
 
-__all__ = ["User", "Message"]
+__all__ = ["User", "Message", "PuzzleBank"]

@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from core.db import engine, init_db
 from core.llm_service import llm_service
-from api import auth, user, chat, turtle_soup, room
+from api import auth, user, chat, turtle_soup, room, undercover
 
 # 检查 MySQL 连接
 try:
@@ -37,6 +37,7 @@ app.include_router(user.router)
 app.include_router(chat.router)
 app.include_router(turtle_soup.router)
 app.include_router(room.router)
+app.include_router(undercover.router)
 
 
 @app.get("/health")

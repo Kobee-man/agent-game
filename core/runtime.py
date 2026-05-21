@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # ---- 游戏类型注册表（预留扩展） ----
 GAME_TYPES: dict[str, dict] = {
     "turtle_soup": {"name": "海龟汤", "min_players": 1, "max_players": 4},
+    "undercover": {"name": "谁是卧底", "min_players": 3, "max_players": 10},
 }
 
 
