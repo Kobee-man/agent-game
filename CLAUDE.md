@@ -20,7 +20,6 @@ cd frontend
 npm install          # first time only
 npm run dev          # Vite dev server (port 3000), proxies /api and /ws to backend
 npm run build        # production build
-npm run test:unit    # Vitest single run
 ```
 
 **One-click start (both services):**
@@ -47,7 +46,16 @@ FastAPI Backend (port 8000)
 MySQL (fastapi_chat, localhost:3306)    Ollama (port 11434, optional)
 ```
 
-**Frontend structure:** Vue 3 + Pinia + Vue Router. Two views: `LoginView` (`/`) and `ChatView` (`/chat`). ChatView contains the `TurtleSoupGame` component. API calls use `fetch` with Bearer token in `frontend/src/utils/api.js`.
+**Frontend structure:** Vue 3 + Pinia + Vue Router + Vite. Dark minimalist theme (Linear/Vercel style).
+- `frontend/src/views/LoginView.vue` — `/` Auth forms (login/register/forgot)
+- `frontend/src/views/LobbyView.vue` — `/lobby` Create/join room, room list
+- `frontend/src/views/RoomView.vue` — `/room/:id` Game room (delegates to SoupGame or UndercoverGame)
+- `frontend/src/stores/auth.js` — Pinia store for JWT token + user profile
+- `frontend/src/utils/api.js` — fetch wrapper with Bearer token auth
+- `frontend/src/components/common/` — Button, Input, Card, Modal, Avatar
+- `frontend/src/components/auth/` — LoginForm, RegisterForm, ForgotPasswordForm
+- `frontend/src/components/lobby/` — CreateRoomPanel, JoinRoomPanel, RoomList
+- `frontend/src/components/room/` — RoomSidebar, ChatPanel, SoupGame, UndercoverGame
 
 **Game state:** Active games are stored in an in-memory dict (`games_db`) in `api/turtle_soup.py` — lost on restart. Chat messages persist to MySQL.
 

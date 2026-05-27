@@ -35,7 +35,7 @@ def update_nickname(
 ):
     if not user_update.nickname:
         raise HTTPException(status_code=400, detail="昵称不能为空")
-    current_user.nickname = user_update.nickname
+    current_user.nickname = user_update.nickname # type: ignore
     db.commit()
     return {"msg": "昵称修改成功", "data": {"nickname": current_user.nickname}}
 
@@ -60,6 +60,6 @@ async def upload_avatar(
     save_name = f"{current_user.uid}.{ext}"
     (AVATAR_DIR / save_name).write_bytes(contents)
 
-    current_user.avatar_url = f"/static/avatars/{save_name}"
+    current_user.avatar_url = f"/static/avatars/{save_name}" # type: ignore
     db.commit()
     return {"msg": "头像上传成功", "avatar_url": current_user.avatar_url}

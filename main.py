@@ -32,12 +32,12 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-app.include_router(auth.router)
-app.include_router(user.router)
-app.include_router(chat.router)
-app.include_router(turtle_soup.router)
-app.include_router(room.router)
-app.include_router(undercover.router)
+app.include_router(auth.router, prefix="/api")
+app.include_router(user.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
+app.include_router(turtle_soup.router, prefix="/api")
+app.include_router(room.router, prefix="/api")
+app.include_router(undercover.router, prefix="/api")
 
 
 @app.get("/health")

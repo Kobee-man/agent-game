@@ -292,6 +292,18 @@ async def list_rooms():
     return {"rooms": runtime.list_rooms(), "total": runtime.room_count}
 
 
+@router.get("/my-room")
+async def my_room(current_user: User = Depends(get_current_user)):
+    """查看当前用户所在的房间。"""
+    room_id = runtime.get_player_room(current_user.uid)
+    if not room_id:
+        return {"in_room": False}
+    room = runtime.get_room(room_id)
+    if not room:
+        return {"in_room": False}
+    return {"in_room": True, "room_id": room_id, **room.to_status_dict()}
+
+
 @router.post("/leave")
 async def leave_room(current_user: User = Depends(get_current_user)):
     """离开当前房间。"""
@@ -308,6 +320,21 @@ async def leave_room(current_user: User = Depends(get_current_user)):
         if not room.players and room.sm.state != State.RUNNING:
             await runtime.close_room(room_id)
     return {"success": True, "left": room_id}
+
+
+@router.post("/destroy")
+async def destroy_room(current_user: User = Depends(get_current_user)):
+    """解散房间（仅房主）。"""
+    room_id = runtime.get_player_room(current_user.uid)
+    if not room_id:
+        raise HTTPException(status_code=400, detail="未在任何房间中")
+    room = runtime.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="房间不存在")
+    if room.host_uid != current_user.uid:
+        raise HTTPException(status_code=403, detail="仅房主可解散房间")
+    await runtime.close_room(room_id)
+    return {"success": True, "destroyed": room_id}
 
 
 # ==================== WebSocket ====================

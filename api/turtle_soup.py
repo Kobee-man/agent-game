@@ -30,7 +30,7 @@ def _puzzle(game_id: str) -> Optional[dict]:
     game = games_db.get(game_id)
     if game and game.get("_puzzle"):
         return game["_puzzle"]
-    return redis_service.get_puzzle(game_id, prefix="single:")
+    return redis_service.get_puzzle(game_id, prefix="single:") # type: ignore
 
 
 async def _llm_judge(prompt: str, required_key: str, retries: int = 2) -> dict:
@@ -50,7 +50,7 @@ async def _llm_judge(prompt: str, required_key: str, retries: int = 2) -> dict:
 
 def _save_history(game_id: str, question: str, answer: str, reason: str = ""):
     try:
-        redis_service.append_history(game_id, question, answer, reason, prefix="single:")
+        redis_service.append_history(game_id, question, answer, reason, prefix="single:") # type: ignore
     except Exception:
         logger.warning(f"Redis历史写入失败: {game_id}")
 
