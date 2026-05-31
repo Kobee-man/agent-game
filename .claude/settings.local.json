@@ -17,7 +17,11 @@
       "Bash(pip install *)",
       "Bash(pip uninstall *)",
       "WebSearch",
-      "WebFetch(domain:python.langchain.com)"
+      "WebFetch(domain:python.langchain.com)",
+      "Bash(pip search *)",
+      "Bash(pip index *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat: 阶段一 T6/T7 - Embedding + PGVector 向量库 *)"
     ]
   }
 }
