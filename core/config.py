@@ -23,3 +23,22 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 PUZZLE_EXPIRE_SECONDS = 7200
+
+# ==================== LLM ====================
+LLM_MODE = os.getenv("LLM_MODE", "external")
+LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("DEEPSEEK_API_KEY", ""))
+LLM_API_URL = os.getenv("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
+LLM_API_MODEL = os.getenv("LLM_API_MODEL", "deepseek-chat")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.5"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1000"))
+
+# ==================== Embedding ====================
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
+
+# ==================== 向量库 ====================
+VECTOR_COLLECTION_PREFIX = os.getenv("VECTOR_COLLECTION_PREFIX", "htg_")
+VECTOR_SEARCH_TOP_K = int(os.getenv("VECTOR_SEARCH_TOP_K", "5"))
+VECTOR_DISTANCE_THRESHOLD = float(os.getenv("VECTOR_DISTANCE_THRESHOLD", "0.7"))

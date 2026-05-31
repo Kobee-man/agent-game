@@ -5,6 +5,22 @@ python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
 psycopg2-binary
-httpx
 python-dotenv
 redis
+
+# ===== LangChain =====
+langchain-core
+langchain
+langchain-community
+langchain-deepseek
+langchain-ollama
+langchain-huggingface
+langchain-text-splitters
+langchain-postgres
+
+# ===== Embedding =====
+sentence-transformers
+
+# ===== Vector Store =====
+pgvector
+psycopg[binary]

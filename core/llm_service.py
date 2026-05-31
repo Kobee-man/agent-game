@@ -1,62 +1,32 @@
-import os
+"""LLM 服务兼容层：保留旧接口，内部调用 LangChain。"""
+
 import logging
-import httpx
-from typing import Optional
-from dataclasses import dataclass, field
+from langchain_core.messages import HumanMessage, SystemMessage
+from core.llm_factory import create_llm
+from core.config import LLM_MODE, LLM_API_KEY
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class LLMConfig:
-    mode: str = field(default_factory=lambda: os.getenv("LLM_MODE", "external"))
-    ollama_host: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434"))
-    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen3.5:4b"))
-    api_url: str = field(default_factory=lambda: os.getenv("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions"))
-    api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", os.getenv("DEEPSEEK_API_KEY", "")))
-    api_model: str = field(default_factory=lambda: os.getenv("LLM_API_MODEL", "deepseek-chat"))
-    temperature: float = 0.5
-    max_tokens: int = 1000
-    timeout: float = 30.0
-    # 连接池
-    external_max_connections: int = 10
-    external_max_keepalive: int = 5
-    ollama_max_connections: int = 5
-    ollama_max_keepalive: int = 2
-
-
 class LLMError(Exception):
+    """LLM 调用异常（保留兼容）。"""
     pass
 
 
 class LLMService:
-    def __init__(self, config: Optional[LLMConfig] = None):
-        self.config = config or LLMConfig()
-        # 外部API连接池
-        self._external_client = httpx.AsyncClient(
-            timeout=self.config.timeout,
-            limits=httpx.Limits(
-                max_connections=self.config.external_max_connections,
-                max_keepalive_connections=self.config.external_max_keepalive,
-            ),
-        )
-        # 本地Ollama连接池
-        self._ollama_client = httpx.AsyncClient(
-            timeout=self.config.timeout,
-            limits=httpx.Limits(
-                max_connections=self.config.ollama_max_connections,
-                max_keepalive_connections=self.config.ollama_max_keepalive,
-            ),
-        )
+    """向后兼容的 LLM 服务。"""
+
+    def __init__(self):
+        self._llm = None
 
     @property
     def mode(self) -> str:
-        return self.config.mode
+        return LLM_MODE
 
     def is_available(self) -> bool:
-        if self.config.mode == "local":
+        if LLM_MODE == "local":
             return True
-        return bool(self.config.api_key)
+        return bool(LLM_API_KEY)
 
     async def chat(
         self,
@@ -65,92 +35,40 @@ class LLMService:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        t = temperature if temperature is not None else self.config.temperature
-        m = max_tokens if max_tokens is not None else self.config.max_tokens
-
-        if self.config.mode == "local":
-            return await self._call_ollama(prompt, system_prompt, t, m)
-        elif self.config.mode == "external":
-            # 一级: 外部API
-            try:
-                return await self._call_external(prompt, system_prompt, t, m)
-            except (httpx.TimeoutException, httpx.ConnectError) as e:
-                logger.warning(f"外部API失败({type(e).__name__})，降级到本地Ollama")
-            # 二级: 本地Ollama
-            try:
-                return await self._call_ollama(prompt, system_prompt, t, m)
-            except LLMError as e:
-                logger.warning(f"本地Ollama也失败: {e}，降级到题库")
-            # 三级: 题库
-            from core.puzzle_bank import puzzle_bank
-            puzzle = puzzle_bank.get_random()
-            if puzzle:
-                logger.info("从题库返回随机题目")
-                import json
-                return json.dumps(puzzle, ensure_ascii=False)
-            raise LLMError("所有LLM通道不可用且题库为空")
-        raise LLMError(f"不支持的模式: {self.config.mode}")
-
-    async def _call_ollama(self, prompt: str, system: str, temp: float, max_tok: int) -> str:
-        payload = {
-            "model": self.config.ollama_model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": temp, "num_predict": max_tok},
-        }
-        if system:
-            payload["system"] = system
-
-        try:
-            resp = await self._ollama_client.post(f"{self.config.ollama_host}/api/generate", json=payload)
-            if resp.status_code != 200:
-                raise LLMError(f"Ollama错误 (HTTP {resp.status_code})")
-            text = resp.json().get("response", "").strip()
-            if not text:
-                raise LLMError("Ollama返回空内容")
-            return text
-        except httpx.ConnectError:
-            raise LLMError("无法连接Ollama，请确认 ollama serve 已启动")
-        except httpx.TimeoutException:
-            raise LLMError(f"Ollama超时 ({self.config.timeout}s)")
-        except LLMError:
-            raise
-        except Exception as e:
-            raise LLMError(f"Ollama调用失败: {e}")
-
-    async def _call_external(self, prompt: str, system: str, temp: float, max_tok: int) -> str:
-        if not self.config.api_key:
-            raise LLMError("需要设置 LLM_API_KEY")
-
+        """兼容旧接口：prompt → LangChain messages → invoke。"""
         messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=prompt))
 
-        headers = {"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.config.api_model,
-            "messages": messages,
-            "temperature": temp,
-            "max_tokens": max_tok,
-        }
-
+        # 主 LLM
         try:
-            resp = await self._external_client.post(self.config.api_url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"]
-            elif resp.status_code == 401:
-                raise LLMError("API密钥无效")
-            elif resp.status_code == 429:
-                raise LLMError("请求频率超限")
-            else:
-                raise LLMError(f"API错误 (HTTP {resp.status_code})")
-        except LLMError:
-            raise
-        except (httpx.TimeoutException, httpx.ConnectError):
-            raise
+            llm = create_llm(temperature=temperature, max_tokens=max_tokens)
+            response = await llm.ainvoke(messages)
+            return response.content
         except Exception as e:
-            raise LLMError(f"调用失败: {e}")
+            logger.warning(f"主 LLM 调用失败 ({type(e).__name__}): {e}")
+
+        # 降级: 切换模式
+        fallback_mode = "local" if LLM_MODE == "external" else "external"
+        try:
+            llm = create_llm(mode=fallback_mode, temperature=temperature, max_tokens=max_tokens)
+            response = await llm.ainvoke(messages)
+            logger.info(f"降级到 {fallback_mode} 成功")
+            return response.content
+        except Exception as e:
+            logger.warning(f"备用 LLM 也失败 ({type(e).__name__}): {e}")
+
+        # 最终降级: 题库
+        from core.puzzle_bank import puzzle_bank
+        puzzle = puzzle_bank.get_random()
+        if puzzle:
+            logger.info("从题库返回随机题目")
+            import json
+            return json.dumps(puzzle, ensure_ascii=False)
+
+        raise LLMError("所有 LLM 通道不可用且题库为空")
 
 
+# 全局单例（保持兼容）
 llm_service = LLMService()
