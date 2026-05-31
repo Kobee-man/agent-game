@@ -38,12 +38,12 @@ FastAPI Backend (port 8000)
   ├── api/user.py          /profile, /user/nickname, /user/avatar
   ├── api/chat.py          /ws/chat/{token} (WebSocket), /chat/online-users
   ├── api/turtle_soup.py   /turtle-soup/* (game CRUD, questions, answers)
-  ├── core/config.py       DB engine (MySQL via SQLAlchemy), JWT config, file paths
+  ├── core/config.py       DB engine (PostgreSQL via SQLAlchemy), JWT config, file paths
   ├── core/security.py     bcrypt password hashing, JWT encode/decode
   ├── core/llm_service.py  LLM service: dual-mode (local Ollama / external OpenAI-compatible API)
   ├── models/db_models.py  User, PublicChatMessage, PrivateChatSession, PrivateChatMessage
                               |
-MySQL (fastapi_chat, localhost:3306)    Ollama (port 11434, optional)
+PostgreSQL (fastapi_chat, localhost:5432)    Ollama (port 11434, optional)
 ```
 
 **Frontend structure:** Vue 3 + Pinia + Vue Router + Vite. Dark minimalist theme (Linear/Vercel style).
@@ -57,7 +57,7 @@ MySQL (fastapi_chat, localhost:3306)    Ollama (port 11434, optional)
 - `frontend/src/components/lobby/` — CreateRoomPanel, JoinRoomPanel, RoomList
 - `frontend/src/components/room/` — RoomSidebar, ChatPanel, SoupGame, UndercoverGame
 
-**Game state:** Active games are stored in an in-memory dict (`games_db`) in `api/turtle_soup.py` — lost on restart. Chat messages persist to MySQL.
+**Game state:** Active games are stored in an in-memory dict (`games_db`) in `api/turtle_soup.py` — lost on restart. Chat messages persist to PostgreSQL.
 
 **LLM integration (`core/llm_service.py`):** Supports two switchable modes via `LLM_MODE` env var:
 - `"local"` (default): Ollama with Qwen 3.5:4b, connects to `OLLAMA_HOST` (default `http://localhost:11434`)

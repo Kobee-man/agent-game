@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 # 数据库
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+pymysql://root:root@localhost:3306/fastapi_chat?charset=utf8mb4")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:123456@localhost:5432/fastapi_chat")
 
 # JWT
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me")

@@ -4,7 +4,7 @@ sqlalchemy
 python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
-pymysql
+psycopg2-binary
 httpx
 python-dotenv
 redis

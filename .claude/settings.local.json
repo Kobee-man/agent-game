@@ -11,7 +11,13 @@
       "Bash(xargs wc -l)",
       "Bash(python *)",
       "Bash(pip list *)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(psql *)",
+      "Bash(PGPASSWORD=123456 psql *)",
+      "Bash(pip install *)",
+      "Bash(pip uninstall *)",
+      "WebSearch",
+      "WebFetch(domain:python.langchain.com)"
     ]
   }
 }
