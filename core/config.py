@@ -35,8 +35,13 @@ LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.5"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1000"))
 
 # ==================== Embedding ====================
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+# 模式: "api" (Silicon Flow 远程) 或 "local" (HuggingFace 本地)
+EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "api")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
+# Silicon Flow API（国内服务，bge-m3 免费）
+SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
+SILICONFLOW_API_URL = os.getenv("SILICONFLOW_API_URL", "https://api.siliconflow.cn/v1")
 
 # ==================== 向量库 ====================
 VECTOR_COLLECTION_PREFIX = os.getenv("VECTOR_COLLECTION_PREFIX", "htg_")
